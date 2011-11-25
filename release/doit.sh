@@ -22,4 +22,3 @@ cd release && {
 
 rm system/lib/modules/*
 echo ${REL}
-exit 0
