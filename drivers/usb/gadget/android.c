@@ -528,31 +528,32 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	struct mass_storage_function_config *config;
 	struct fsg_common *common;
 	int err;
-
+        int i;
 	config = kzalloc(sizeof(struct mass_storage_function_config),
 								GFP_KERNEL);
 	if (!config)
 		return -ENOMEM;
 
-	config->fsg.nluns = 3;
+	config->fsg.nluns = 2;
 	config->fsg.luns[0].removable = 1;
+        config->fsg.luns[0].cdrom = 0;
         config->fsg.luns[1].removable = 1;
-        config->fsg.luns[2].removable = 1;
         config->fsg.luns[1].cdrom = 1;
-        config->fsg.luns[2].cdrom = 1;
+
 	common = fsg_common_init(NULL, cdev, &config->fsg);
 	if (IS_ERR(common)) {
 		kfree(config);
 		return PTR_ERR(common);
 	}
+	
 
-	err = sysfs_create_link(&f->dev->kobj,
-				&common->luns[0].dev.kobj,
-				"lun");
-	if (err) {
-		kfree(config);
-		return err;
-	}
+        err = sysfs_create_link(&f->dev->kobj,
+			        &common->luns[i].dev.kobj,
+			        "lun");
+        if (err) {
+	        kfree(config);
+	        return err;
+        }
 
 	config->common = common;
 	f->config = config;

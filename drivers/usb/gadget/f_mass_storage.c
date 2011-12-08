@@ -614,12 +614,13 @@ static void bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 static int fsg_setup(struct usb_function *f,
 		const struct usb_ctrlrequest *ctrl)
 {
+        
 	struct fsg_dev		*fsg = fsg_from_func(f);
 	struct usb_request	*req = fsg->common->ep0req;
 	u16			w_index = le16_to_cpu(ctrl->wIndex);
 	u16			w_value = le16_to_cpu(ctrl->wValue);
 	u16			w_length = le16_to_cpu(ctrl->wLength);
-
+        ERROR(fsg->common,"USB Function: %s",f->name);
 	if (!fsg_is_set(fsg->common))
 		return -EOPNOTSUPP;
 
@@ -1458,7 +1459,7 @@ static int do_start_stop(struct fsg_common *common)
 		else if (r)
 			return 0;
 	}
-
+        printk("Simulating eject...\n");
 	up_read(&common->filesem);
 	down_write(&common->filesem);
 	fsg_lun_close(curlun);
