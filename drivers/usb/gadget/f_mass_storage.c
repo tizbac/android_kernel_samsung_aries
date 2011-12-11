@@ -3164,7 +3164,7 @@ static int fsg_probe(struct platform_device *pdev)
 	for (i = 0; i < nluns; i++)
 	{
 
-		if ( i = nluns-1 )//Make the last one a cd-rom
+		if ( i == nluns-1 )//Make the last one a cd-rom
 			fsg_cfg.luns[i].cdrom = 1;
 		fsg_cfg.luns[i].removable = 1;
 	}

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 [[ -d release ]] || {
 	echo "must be in kernel root dir"
