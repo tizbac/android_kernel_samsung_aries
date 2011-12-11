@@ -3157,11 +3157,17 @@ static int fsg_probe(struct platform_device *pdev)
 		return -1;
 
 	nluns = pdata->nluns;
+	nluns++;//Add a cdrom drive
 	if (nluns > FSG_MAX_LUNS)
 		nluns = FSG_MAX_LUNS;
 	fsg_cfg.nluns = nluns;
 	for (i = 0; i < nluns; i++)
+	{
+
+		if ( i = nluns-1 )//Make the last one a cd-rom
+			fsg_cfg.luns[i].cdrom = 1;
 		fsg_cfg.luns[i].removable = 1;
+	}
 
 	fsg_cfg.vendor_name = pdata->vendor;
 	fsg_cfg.product_name = pdata->product;
