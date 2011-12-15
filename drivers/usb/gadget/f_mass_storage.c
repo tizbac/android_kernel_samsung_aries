@@ -275,7 +275,6 @@
 /* #define VERBOSE_DEBUG */
 /* #define DUMP_MSGS */
 
-
 #include <linux/blkdev.h>
 #include <linux/completion.h>
 #include <linux/dcache.h>
@@ -748,7 +747,7 @@ static int do_read(struct fsg_common *common)
 	/* Get the starting Logical Block Address and check that it's
 	 * not too big */
 	if (common->cmnd[0] == SC_READ_6)
-		lba = get_unaligned_be24(&common->cmnd[1]);
+		lba = (common->cmnd[1] << 16) | get_unaligned_be16(&common->cmnd[2]);
 	else {
 		lba = get_unaligned_be32(&common->cmnd[2]);
 
@@ -764,7 +763,11 @@ static int do_read(struct fsg_common *common)
 		curlun->sense_data = SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
 		return -EINVAL;
 	}
-	file_offset = ((loff_t) lba) << 9;
+	loff_t shift_size;
+	shift_size = 9;
+	if ( curlun->cdrom )
+		shift_size = 11;
+	file_offset = ((loff_t) lba) << shift_size;
 
 	/* Carry out the file reads */
 	amount_left = common->data_size_from_cmnd;
@@ -802,7 +805,7 @@ static int do_read(struct fsg_common *common)
 		if (amount == 0) {
 			curlun->sense_data =
 					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
-			curlun->sense_data_info = file_offset >> 9;
+			curlun->sense_data_info = file_offset >> shift_size;
 			curlun->info_valid = 1;
 			bh->inreq->length = 0;
 			bh->state = BUF_STATE_FULL;
@@ -838,7 +841,7 @@ static int do_read(struct fsg_common *common)
 		/* If an error occurred, report it and its position */
 		if (nread < amount) {
 			curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
-			curlun->sense_data_info = file_offset >> 9;
+			curlun->sense_data_info = file_offset >> shift_size;
 			curlun->info_valid = 1;
 			break;
 		}
@@ -886,7 +889,7 @@ static int do_write(struct fsg_common *common)
 	/* Get the starting Logical Block Address and check that it's
 	 * not too big */
 	if (common->cmnd[0] == SC_WRITE_6)
-		lba = get_unaligned_be24(&common->cmnd[1]);
+		lba = (common->cmnd[1] << 16) | get_unaligned_be16(&common->cmnd[2]);
 	else {
 		lba = get_unaligned_be32(&common->cmnd[2]);
 
@@ -911,7 +914,8 @@ static int do_write(struct fsg_common *common)
 
 	/* Carry out the file writes */
 	get_some_more = 1;
-	file_offset = usb_offset = ((loff_t) lba) << 9;
+	loff_t shift_size = curlun->cdrom ? 11 : 9;
+	file_offset = usb_offset = ((loff_t) lba) << shift_size;
 	amount_left_to_req = common->data_size_from_cmnd;
 	amount_left_to_write = common->data_size_from_cmnd;
 
@@ -942,7 +946,7 @@ static int do_write(struct fsg_common *common)
 				get_some_more = 0;
 				curlun->sense_data =
 					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
-				curlun->sense_data_info = usb_offset >> 9;
+				curlun->sense_data_info = usb_offset >> shift_size;
 				curlun->info_valid = 1;
 				continue;
 			}
@@ -988,7 +992,7 @@ static int do_write(struct fsg_common *common)
 			/* Did something go wrong with the transfer? */
 			if (bh->outreq->status != 0) {
 				curlun->sense_data = SS_COMMUNICATION_FAILURE;
-				curlun->sense_data_info = file_offset >> 9;
+				curlun->sense_data_info = file_offset >> shift_size;
 				curlun->info_valid = 1;
 				break;
 			}
@@ -1030,7 +1034,7 @@ static int do_write(struct fsg_common *common)
 			/* If an error occurred, report it and its position */
 			if (nwritten < amount) {
 				curlun->sense_data = SS_WRITE_ERROR;
-				curlun->sense_data_info = file_offset >> 9;
+				curlun->sense_data_info = file_offset >> shift_size;
 				curlun->info_valid = 1;
 				break;
 			}
@@ -1110,10 +1114,10 @@ static int do_verify(struct fsg_common *common)
 	verification_length = get_unaligned_be16(&common->cmnd[7]);
 	if (unlikely(verification_length == 0))
 		return -EIO;		/* No default reply */
-
+	loff_t shift_size = curlun->cdrom ? 11 : 9;
 	/* Prepare to carry out the file verify */
-	amount_left = verification_length << 9;
-	file_offset = ((loff_t) lba) << 9;
+	amount_left = verification_length << shift_size;
+	file_offset = ((loff_t) lba) << shift_size;
 
 	/* Write out all the dirty buffers before invalidating them */
 	fsg_lun_fsync_sub(curlun);
@@ -1139,7 +1143,7 @@ static int do_verify(struct fsg_common *common)
 		if (amount == 0) {
 			curlun->sense_data =
 					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
-			curlun->sense_data_info = file_offset >> 9;
+			curlun->sense_data_info = file_offset >> shift_size;
 			curlun->info_valid = 1;
 			break;
 		}
@@ -1166,7 +1170,7 @@ static int do_verify(struct fsg_common *common)
 		}
 		if (nread == 0) {
 			curlun->sense_data = SS_UNRECOVERED_READ_ERROR;
-			curlun->sense_data_info = file_offset >> 9;
+			curlun->sense_data_info = file_offset >> shift_size;
 			curlun->info_valid = 1;
 			break;
 		}
@@ -1193,7 +1197,8 @@ static int do_inquiry(struct fsg_common *common, struct fsg_buffhd *bh)
 	}
 
 	buf[0] = curlun->cdrom ? TYPE_CDROM : TYPE_DISK;
-	buf[1] = curlun->removable ? 0x80 : 0;
+
+	buf[1] = (curlun->removable && !curlun->cdrom) ? 0x80 : 0;
 	buf[2] = 2;		/* ANSI SCSI level 2 */
 	buf[3] = 2;		/* SCSI-2 INQUIRY data format */
 	buf[4] = 31;		/* Additional length */
@@ -1274,7 +1279,8 @@ static int do_read_capacity(struct fsg_common *common, struct fsg_buffhd *bh)
 
 	put_unaligned_be32(curlun->num_sectors - 1, &buf[0]);
 						/* Max logical block */
-	put_unaligned_be32(512, &buf[4]);	/* Block length */
+	loff_t shift_size = curlun->cdrom ? 11 : 9;
+	put_unaligned_be32(1 << shift_size, &buf[4]);	/* Block length */
 	return 8;
 }
 
@@ -1314,18 +1320,19 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 		return -EINVAL;
 	}
-
 	memset(buf, 0, 20);
 	buf[1] = (20-2);		/* TOC data length */
 	buf[2] = 1;			/* First track number */
 	buf[3] = 1;			/* Last track number */
-	buf[5] = 0x16;			/* Data track, copying allowed */
+	buf[5] = 0x14;			/* Data track, copying allowed */
 	buf[6] = 0x01;			/* Only track is number 1 */
 	store_cdrom_address(&buf[8], msf, 0);
 
 	buf[13] = 0x16;			/* Lead-out track is data */
 	buf[14] = 0xAA;			/* Lead-out track number */
 	store_cdrom_address(&buf[16], msf, curlun->num_sectors);
+
+
 	return 20;
 }
 
@@ -1510,7 +1517,8 @@ static int do_read_format_capacities(struct fsg_common *common,
 
 	put_unaligned_be32(curlun->num_sectors, &buf[0]);
 						/* Number of blocks */
-	put_unaligned_be32(512, &buf[4]);	/* Block length */
+	loff_t shift_size = curlun->cdrom ? 11 : 9;
+	put_unaligned_be32(1 << shift_size, &buf[4]);	/* Block length */
 	buf[4] = 0x02;				/* Current capacity */
 	return 12;
 }
@@ -1832,7 +1840,7 @@ static int check_command(struct fsg_common *common, int cmnd_size,
 	if (common->data_dir != DATA_DIR_UNKNOWN)
 		sprintf(hdlen, ", H%c=%u", dirletter[(int) common->data_dir],
 				common->data_size);
-	VDBG(common, "SCSI command: %s;  Dc=%d, D%c=%u;  Hc=%d%s\n",
+	printk( "LUN: %d , SCSI command: %s;  Dc=%d, D%c=%u;  Hc=%d%s\n",lun,
 	     name, cmnd_size, dirletter[(int) data_dir],
 	     common->data_size_from_cmnd, common->cmnd_size, hdlen);
 
@@ -1962,7 +1970,7 @@ static int do_scsi_command(struct fsg_common *common)
 	}
 	common->phase_error = 0;
 	common->short_packet_received = 0;
-
+	loff_t shift_size = common->curlun->cdrom ? 11 : 9;
 	down_read(&common->filesem);	/* We're using the backing file */
 	switch (common->cmnd[0]) {
 
@@ -2024,7 +2032,7 @@ static int do_scsi_command(struct fsg_common *common)
 
 	case SC_READ_6:
 		i = common->cmnd[4];
-		common->data_size_from_cmnd = (i == 0 ? 256 : i) << 9;
+		common->data_size_from_cmnd = (i == 0 ? 256 : i) << shift_size;
 		reply = check_command(common, 6, DATA_DIR_TO_HOST,
 				      (7<<1) | (1<<4), 1,
 				      "READ(6)");
@@ -2034,7 +2042,7 @@ static int do_scsi_command(struct fsg_common *common)
 
 	case SC_READ_10:
 		common->data_size_from_cmnd =
-				get_unaligned_be16(&common->cmnd[7]) << 9;
+				get_unaligned_be16(&common->cmnd[7]) << shift_size;
 		reply = check_command(common, 10, DATA_DIR_TO_HOST,
 				      (1<<1) | (0xf<<2) | (3<<7), 1,
 				      "READ(10)");
@@ -2044,7 +2052,7 @@ static int do_scsi_command(struct fsg_common *common)
 
 	case SC_READ_12:
 		common->data_size_from_cmnd =
-				get_unaligned_be32(&common->cmnd[6]) << 9;
+				get_unaligned_be32(&common->cmnd[6]) << shift_size;
 		reply = check_command(common, 12, DATA_DIR_TO_HOST,
 				      (1<<1) | (0xf<<2) | (0xf<<6), 1,
 				      "READ(12)");
@@ -2142,7 +2150,7 @@ static int do_scsi_command(struct fsg_common *common)
 
 	case SC_WRITE_6:
 		i = common->cmnd[4];
-		common->data_size_from_cmnd = (i == 0 ? 256 : i) << 9;
+		common->data_size_from_cmnd = (i == 0 ? 256 : i) << shift_size;
 		reply = check_command(common, 6, DATA_DIR_FROM_HOST,
 				      (7<<1) | (1<<4), 1,
 				      "WRITE(6)");
@@ -2152,7 +2160,7 @@ static int do_scsi_command(struct fsg_common *common)
 
 	case SC_WRITE_10:
 		common->data_size_from_cmnd =
-				get_unaligned_be16(&common->cmnd[7]) << 9;
+				get_unaligned_be16(&common->cmnd[7]) << shift_size;
 		reply = check_command(common, 10, DATA_DIR_FROM_HOST,
 				      (1<<1) | (0xf<<2) | (3<<7), 1,
 				      "WRITE(10)");
@@ -2162,7 +2170,7 @@ static int do_scsi_command(struct fsg_common *common)
 
 	case SC_WRITE_12:
 		common->data_size_from_cmnd =
-				get_unaligned_be32(&common->cmnd[6]) << 9;
+				get_unaligned_be32(&common->cmnd[6]) << shift_size;
 		reply = check_command(common, 12, DATA_DIR_FROM_HOST,
 				      (1<<1) | (0xf<<2) | (0xf<<6), 1,
 				      "WRITE(12)");
@@ -2206,7 +2214,7 @@ unknown_cmnd:
 		bh->state = BUF_STATE_FULL;
 		common->residue -= reply;
 	}				/* Otherwise it's already set */
-
+	printk("Reply : %d\n",reply);
 	return 0;
 }
 
@@ -2749,7 +2757,7 @@ static struct fsg_common *fsg_common_init(struct fsg_common *common,
 	common->gadget = gadget;
 	common->ep0 = gadget->ep0;
 	common->ep0req = cdev->req;
-
+        common->cdev = cdev;
 	/*
 	 * Register UMS switch for Android.
 	 */
